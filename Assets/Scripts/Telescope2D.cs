@@ -16,7 +16,8 @@ public class Telescope2D : MonoBehaviour {
     HashSet<MomentumTrail2D> trails;
 
 	// Use this for initialization
-	void OnEnable () {
+	void OnEnable ()
+    {
         if(Physics2D.autoSimulation)
         {
             Debug.Log($"Automatically deactivating {nameof(Physics2D.autoSimulation)}");
@@ -26,7 +27,8 @@ public class Telescope2D : MonoBehaviour {
 	}
 
     // Update is called once per frame
-    void FixedUpdate () {
+    void FixedUpdate ()
+    {
         Debug.Assert(
             !Physics2D.autoSimulation,
             $"{nameof(Physics2D.autoSimulation)} should be deactivated" 
@@ -49,31 +51,37 @@ public class Telescope2D : MonoBehaviour {
         );
 
 		foreseeTime = Mathf.Min(
-			time + foreseeChunk,
+            simulatedTime + foreseeChunk,
 			time + foresee
 		);
 
+        bool synced = false;
         while (simulatedTime < foreseeTime)
         {
             if (Mathf.Approximately(simulatedTime, foreseeTime))
                 simulatedTime = foreseeTime;
             else
             {
-				Physics2D.Simulate(Time.fixedDeltaTime);
-				simulatedTime += Time.fixedDeltaTime;
-                foreach(MomentumTrail2D trail in trails)
+                foreach (MomentumTrail2D trail in trails)
+                    trail.BeginSimulation(simulatedTime);
+                Physics2D.Simulate(Time.fixedDeltaTime);
+                simulatedTime += Time.fixedDeltaTime;
+                foreach (MomentumTrail2D trail in trails)
                 {
-                    if (    simulatedTime <= time
-                        ||  Mathf.Approximately(simulatedTime, time))
-                        trail.Step(simulatedTime, rememberTime);
-                    else
-                        trail.Foresee(simulatedTime);
-                        
+                    trail.EndSimulation(simulatedTime); 
+                    if (!synced)
+                        trail.Step(time);
                 }
+                synced = true;
             }
         }
 
-
+        if (!synced)
+        {
+            foreach (MomentumTrail2D trail in trails)
+                trail.Step(time);
+            synced = true;
+        }
 
         Debug.Log(
                 $"{nameof(Time.time)} {Time.time:N4} "
@@ -102,8 +110,6 @@ public class Telescope2D : MonoBehaviour {
 			if (trail == null)
 				trail = body.gameObject.AddComponent<MomentumTrail2D>();
 			trails.Add(trail);
-
-            trail.SnapToTrack(currentTime, rememberTime);
         }
 
         clearSight = true;
