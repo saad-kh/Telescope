@@ -47,8 +47,8 @@ namespace Telescope2D
 
 			float simulatedTime = foreseen;
 
-			remembered = Mathf.Min(
-				time - remember,
+			remembered = Mathf.Max(
+                time - remember,
 				remembered
 			);
 
@@ -57,42 +57,38 @@ namespace Telescope2D
 				time + foresee
 			);
 
-			bool synced = false;
-			while (simulatedTime < foreseen)
-			{
-				if (Mathf.Approximately(simulatedTime, foreseen))
-					simulatedTime = foreseen;
-				else
-				{
-					foreach (MomentumTrail2D trail in trails)
-						trail.BeginSimulation(simulatedTime);
-					Physics2D.Simulate(Time.fixedDeltaTime);
-					simulatedTime += Time.fixedDeltaTime;
-					foreach (MomentumTrail2D trail in trails)
-					{
-						trail.EndSimulation(simulatedTime);
-						if (!synced)
-							trail.Step(time);
-					}
-					synced = true;
-				}
-			}
+            foreach (MomentumTrail2D trail in trails)
+            {
+				trail.PurgeMomentumsOlderThan(remembered);
+				trail.PurgeMomentumsNewerThan(simulatedTime);
+            }
 
-			if (!synced)
+			bool done = simulatedTime >= foreseen
+					|| Mathf.Approximately(simulatedTime, foreseen);
+            
+            while (!done)
 			{
 				foreach (MomentumTrail2D trail in trails)
-					trail.Step(time);
-				synced = true;
-			}
+					trail.GoToTime(simulatedTime);
+				
+                Physics2D.Simulate(Time.fixedDeltaTime);
+				simulatedTime += Time.fixedDeltaTime;
 
-			Debug.Log(
-					$"{nameof(Time.time)} {Time.time:N4} "
-				+ $"{nameof(Time.deltaTime)} {Time.deltaTime:N4} "
-				+ $"{nameof(Time.fixedTime)} {Time.fixedTime:N4} "
-				+ $"{nameof(Time.fixedDeltaTime)} {Time.fixedDeltaTime:N4} "
-				+ $"{nameof(time)} {time:N4} "
-				+ $"{nameof(remembered)} {remembered:N4} "
-				+ $"{nameof(foreseen)} {foreseen:N4} "
+				foreach (MomentumTrail2D trail in trails)
+                    trail.DigestMomentum(simulatedTime);
+
+				done = simulatedTime >= foreseen
+	                || Mathf.Approximately(simulatedTime, foreseen);
+			}
+            foreseen = simulatedTime;
+
+            foreach (MomentumTrail2D trail in trails)
+                trail.GoToTime(time);
+			
+            Debug.Log(
+				    $"{nameof(time)} {time:N4} "
+				+   $"{nameof(remembered)} {remembered:N4} "
+				+   $"{nameof(foreseen)} {foreseen:N4} "
 			);
 		}
 

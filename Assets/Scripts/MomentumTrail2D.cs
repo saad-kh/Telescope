@@ -7,11 +7,10 @@ namespace Telescope2D
 	[RequireComponent(typeof(Rigidbody2D))]
 	public class MomentumTrail2D : MonoBehaviour
 	{
-
-		public float time { get; private set; } = 0f;
+        public int suggestedTrailCapacity = 100;
 
 		Rigidbody2D body;
-		int currentIndex;
+		int index;
 		List<Momentum2D> momentums;
 
 		void OnEnable()
@@ -19,200 +18,200 @@ namespace Telescope2D
 			body = GetComponent<Rigidbody2D>();
 			if (momentums == null)
 			{
-				momentums = new List<Momentum2D>();
+                momentums = new List<Momentum2D>(suggestedTrailCapacity);
 				momentums.Add(ExtractMomentum(Time.fixedTime));
 			}
 		}
 
-        public void Step(float toTime)
-		{
-			float currentMomentumTime = momentums[currentIndex].time;
-			bool synced = false;
-			if (Mathf.Approximately(currentMomentumTime, toTime))
-			{
-				momentums[currentIndex] = ExtractMomentum(toTime);
-				time = toTime;
-				synced = true;
-			}
-			else if (currentMomentumTime > toTime)
-			{
-				momentums[currentIndex] = ExtractMomentum(toTime);
-				time = toTime;
-				synced = true;
-				if (currentIndex < momentums.Count - 1)
-					momentums.RemoveRange(currentIndex + 1, momentums.Count - currentIndex);
-			}
-			else
-			{
-				if (currentIndex == momentums.Count - 1)
-				{
-					momentums.Add(ExtractMomentum(toTime));
-					currentIndex++;
-					time = toTime;
-                    synced = true;
-				}
-				else
-				{
-					bool done = false;
-					bool found = false;
-					int nextIndex = currentIndex + 1;
-					while (!done && nextIndex < momentums.Count)
-					{
-						float nextMomentumTime = momentums[nextIndex].time;
-						if (Mathf.Approximately(nextMomentumTime, toTime))
-						{
-							currentIndex = nextIndex;
-							found = done = true;
-						}
-						else if (nextMomentumTime > toTime)
-							done = true;
-						else
-							nextIndex++;
-					}
+        public void GoToTime(float time)
+        {
+            int indexForTime = MomentumIndexForTime(time);
+            float momentumTime = momentums[indexForTime].time;
 
-					if (!found)
-					{
-						if (currentIndex < momentums.Count - 1)
-						{
-							momentums.Insert(
-								currentIndex + 1,
-								Momentum2D.InterpolateMomentum(
-									toTime,
-									momentums[currentIndex],
-									momentums[currentIndex + 1]
-								)
-							);
-							currentIndex++;
-						}
-						else if (currentIndex > 0)
-						{
-							momentums.Insert(
-								currentIndex + 1,
-								Momentum2D.InterpolateMomentum(
-									toTime,
-									momentums[currentIndex - 1],
-									momentums[currentIndex]
-								)
-							);
-							currentIndex++;
-						}
-						else
-                        {
-                            momentums.Add(ExtractMomentum(toTime));
-                            currentIndex++;
-                            time = toTime;
-                            synced = true;
-                        }
-							
-					}
-				}
-			}
+            if (!Mathf.Approximately(momentumTime, time))
+            {
+                int index0 = indexForTime;
+                int index1 = indexForTime;
 
-			if (!synced)
-			{
-				ApplyMomentum(momentums[currentIndex]);
-				time = toTime;
-			}
+                if(momentumTime < time)
+                {
+					if (indexForTime < momentums.Count - 1)
+						index1 = indexForTime + 1;
+					else if (indexForTime > 0)
+						index0 = indexForTime - 1;
+                    indexForTime++;
+                }
+                else
+                {
+                    if (indexForTime > 0)
+                        index0 = indexForTime - 1;
+                    else if (indexForTime < momentums.Count - 1)
+                        index1 = indexForTime + 1;
+                }
 
-		}
+                momentums.Insert(
+                    indexForTime,
+                    Momentum2D.InterpolateMomentum(
+                        time,
+                        momentums[index0],
+                        momentums[index1]
+                    )
+                );
+            }
 
-		public void BeginSimulation(float atTime)
-		{
-			bool found = false;
-			bool done = false;
-			bool synced = false;
-			int futurIndex = momentums.Count - 1;
-			while (!done && futurIndex >= 0)
-			{
-				float futurMomentumTime = momentums[futurIndex].time;
-				if (Mathf.Approximately(futurMomentumTime, atTime))
-				{
-					synced = currentIndex == futurIndex;
-					done = found = true;
-				}
-				else if (futurMomentumTime < atTime)
-					done = true;
-				else
-					futurIndex--;
-			}
+			index = indexForTime;
+			ApplyMomentum(momentums[index]);
+        }
 
-			if (!found)
-			{
-				if (futurIndex == 0)
-				{
-					momentums.Clear();
-					momentums.Add(ExtractMomentum(atTime));
-					currentIndex = 0;
-					time = atTime;
-					synced = true;
-				}
-				else
-				{
-					if (futurIndex < momentums.Count - 1)
-						momentums.Insert(
-							futurIndex + 1,
-                            Momentum2D.InterpolateMomentum(
-								atTime,
-								momentums[futurIndex],
-								momentums[futurIndex + 1]
-							)
-						);
-					else
-						momentums.Insert(
-							futurIndex + 1,
-							Momentum2D.InterpolateMomentum(
-								atTime,
-								momentums[futurIndex - 1],
-								momentums[futurIndex]
-							)
-						);
-					futurIndex++;
-				}
-			}
+        public void DigestMomentum(float time)
+        {
+            Momentum2D momentum = ExtractMomentum(time);
+			int indexForTime = MomentumIndexForTime(time);
+			float momentumTime = momentums[indexForTime].time;
 
-            if (futurIndex < momentums.Count - 1) 
-                momentums.RemoveRange(futurIndex + 1, momentums.Count - (futurIndex + 1));
-
-            if (futurIndex < currentIndex)
-                currentIndex = futurIndex;
-
-			if (!synced)
-			{
-				ApplyMomentum(momentums[momentums.Count - 1]);
-				time = atTime;
-			}
-
-		}
-
-		public void EndSimulation(float atTime)
-		{
-			bool done = false;
-			int pastIndex = momentums.Count - 1;
-			while (!done && pastIndex >= 0)
-			{
-				float futurMomentumTime = momentums[pastIndex].time;
-				if (futurMomentumTime < atTime
-				   && !Mathf.Approximately(futurMomentumTime, atTime))
-					done = true;
-				else
-					pastIndex--;
-			}
-
-			if (pastIndex < momentums.Count - 2)
-			{
-                if (pastIndex < 0) pastIndex = 0;
+            if (!Mathf.Approximately(momentumTime, time))
+            {
+                indexForTime = momentumTime < time 
+                    ? indexForTime + 1
+                    : indexForTime;
                 
-                momentums.RemoveRange(pastIndex + 1, momentums.Count - (pastIndex + 1));
+                index = indexForTime <= index
+                    ? index + 1
+                    : index;
+                    
+				momentums.Insert(
+					indexForTime,
+					momentum
+				);
+            }
+            else
+                momentums[indexForTime] = momentum;
+        }
 
-                if (currentIndex > pastIndex)
-					currentIndex = pastIndex;
+        public int PurgeMomentumsNewerThan(float time)
+        {
+            int indexForTime = MomentumIndexForTime(time);
+
+            bool done = false;
+            while (!done && indexForTime < momentums.Count)
+            {
+                float momentumTime = momentums[indexForTime].time;
+                if (momentumTime > time && !Mathf.Approximately(momentumTime, time))
+                    done = true;
+                else
+                    indexForTime++;
+            }
+
+            if (indexForTime < momentums.Count){
+				if (indexForTime == 0)
+					indexForTime++;
+                
+                int oldIndex = index;
+                index = Mathf.Min(index, indexForTime - 1);
+                
+                momentums.RemoveRange(
+                    indexForTime,
+                    momentums.Count - indexForTime
+                );
+
+                if(oldIndex != index)
+                    ApplyMomentum(momentums[index]);
+            }
+
+            return momentums.Count - indexForTime;
+        }
+
+		public int PurgeMomentumsOlderThan(float time)
+		{
+			int indexForTime = MomentumIndexForTime(time);
+
+			bool done = false;
+			while (!done && indexForTime >= 0)
+			{
+				float momentumTime = momentums[indexForTime].time;
+				if (momentumTime < time && !Mathf.Approximately(momentumTime, time))
+					done = true;
+				else
+					indexForTime--;
 			}
 
-			momentums.Add(ExtractMomentum(atTime));
+			if (indexForTime >= 0)
+			{
+                if (indexForTime == momentums.Count - 1)
+                    indexForTime--;
+                
+                int oldIndex = index;
+                index = Mathf.Max(index - indexForTime, 0);
+				
+                momentums.RemoveRange(
+					0,
+					indexForTime + 1
+				);
 
-			ApplyMomentum(momentums[currentIndex]);
-			time = momentums[currentIndex].time;
+				if (oldIndex != index)
+					ApplyMomentum(momentums[index]);
+			}
+
+            return indexForTime + 1;
 		}
+
+
+        int MomentumIndexForTime(float time)
+        {
+            if (    Mathf.Approximately(momentums[index].time, time))
+                return index;
+
+			if (    index != 0
+				&&  (   time <= momentums[0].time
+                    ||  Mathf.Approximately(momentums[0].time, time)))
+				return 0;
+
+            if (    index != momentums.Count - 1
+				&&  (   time >= momentums[momentums.Count - 1].time
+			        ||  Mathf.Approximately(momentums[momentums.Count - 1].time, time)))
+                return momentums.Count - 1;
+
+            float coeff =   (time - momentums[0].time) 
+                          / (momentums[momentums.Count - 1].time - momentums[0].time);
+            
+            int indexForTime = (int)(Mathf.Clamp(coeff, 0, 1) * (momentums.Count - 1));
+
+            float opMomentumTime = momentums[indexForTime].time;
+
+            if (Mathf.Approximately(opMomentumTime, time))
+                return indexForTime;
+            
+            if (opMomentumTime < time)
+            {
+                bool done = false;
+                while(!done && indexForTime  < momentums.Count - 1)
+                {
+                    float nextOpMomentumTime = momentums[indexForTime + 1].time;
+
+                    if (Mathf.Approximately(nextOpMomentumTime, time)){
+                        indexForTime++;
+                        done = true;
+                    }
+                    else if (nextOpMomentumTime > time)
+                        done = true;
+                    else
+                        indexForTime++;
+                }
+                return indexForTime;
+            }
+            else
+            {
+                bool done = false;
+                while(!done && indexForTime > 0)
+                {
+                    float prevOpMomentumTime = momentums[--indexForTime].time;
+                    done = prevOpMomentumTime < time
+                        || Mathf.Approximately(prevOpMomentumTime, time);
+                }
+                return indexForTime;
+            }
+		}
+
 
 		Momentum2D ExtractMomentum(float forTime)
 		{
@@ -257,6 +256,18 @@ namespace Telescope2D
 			this.angularVelocity = angularVelocity;
 		}
 
+		public Momentum2D(
+			float time,
+            Momentum2D source
+		)
+		{
+			this.time = time;
+			position = source.position;
+			rotation = source.rotation;
+			velocity = source.velocity;
+			angularVelocity = source.angularVelocity;
+		}
+
         public bool Equals(Momentum2D momentum2D)
         {
             return this == momentum2D;
@@ -272,6 +283,11 @@ namespace Telescope2D
             return time.GetHashCode();
 		}
 
+        public bool Same(Momentum2D other)
+        {
+            return Same(this, other);
+        }
+
 		public static bool operator ==(Momentum2D x, Momentum2D y)
 		{
             return (
@@ -283,6 +299,16 @@ namespace Telescope2D
             );
 		}
 
+		public static bool Same(Momentum2D x, Momentum2D y)
+		{
+			return (
+                    x.position == y.position
+				&&  x.rotation == y.rotation
+				&&  x.velocity == y.velocity
+				&&  Mathf.Approximately(x.angularVelocity, y.angularVelocity)
+			);
+		}
+
 		public static bool operator !=(Momentum2D x, Momentum2D y)
 		{
 			return !(x == y);
@@ -290,13 +316,20 @@ namespace Telescope2D
 
 		public static Momentum2D InterpolateMomentum(float t, Momentum2D a, Momentum2D b)
 		{
-			float nt = (t - a.time) / (t - b.time);
+            if (    Mathf.Approximately(a.time, b.time)
+                ||  Mathf.Approximately(t, b.time))
+                return new Momentum2D(t, b);
+
+            if (Mathf.Approximately(t, a.time))
+                return new Momentum2D(t, a);
+            
+            float nt = (t - a.time) / (b.time - a.time);
 			return new Momentum2D(
 				t,
-				Vector2.LerpUnclamped(a.position, b.position, nt),
-				Quaternion.LerpUnclamped(a.rotation, b.rotation, nt),
-				Vector2.LerpUnclamped(a.velocity, b.velocity, nt),
-				Mathf.LerpUnclamped(a.angularVelocity, b.angularVelocity, nt)
+                Vector2.LerpUnclamped(a.position, b.position, nt),
+                Quaternion.LerpUnclamped(a.rotation, b.rotation, nt),
+                Vector2.LerpUnclamped(a.velocity, b.velocity, nt),
+                Mathf.LerpUnclamped(a.angularVelocity, b.angularVelocity, nt)
 			);
 		}
 	}
