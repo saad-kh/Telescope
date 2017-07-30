@@ -707,6 +707,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4affe7ccf97d34e64806c03dc3c2f69b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  remembering: 1
+  foreseeing: 1
   remember: 1
   foresee: 1
   foreseeChunk: 0.1

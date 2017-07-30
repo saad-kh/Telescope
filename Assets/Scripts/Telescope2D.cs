@@ -6,6 +6,8 @@ namespace Telescope2D
 	public class Telescope2D : MonoBehaviour
 	{
 
+        public bool remembering = true;
+        public bool foreseeing = true;
 		public float remember = 1f;
 		public float foresee = 1f;
 		public float foreseeChunk = 0.1f;
@@ -48,12 +50,12 @@ namespace Telescope2D
 			float simulatedTime = foreseen;
 
 			remembered = Mathf.Max(
-                time - remember,
+                time - (remembering ? remember : 0),
 				remembered
 			);
 
 			foreseen = Mathf.Min(
-				simulatedTime + foreseeChunk,
+                simulatedTime + (foreseeing ? foreseeChunk : Time.fixedDeltaTime),
 				time + foresee
 			);
 
