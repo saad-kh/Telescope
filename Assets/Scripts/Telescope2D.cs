@@ -84,12 +84,6 @@ namespace Telescope2D
 
             foreach (MomentumTrail2D trail in trails)
                 trail.GoToTime(time);
-			
-            Debug.Log(
-				    $"{nameof(time)} {time:N4} "
-				+   $"{nameof(remembered)} {remembered:N4} "
-				+   $"{nameof(foreseen)} {foreseen:N4} "
-			);
 		}
 
 		public void BlurSight()

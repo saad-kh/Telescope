@@ -59,8 +59,15 @@ namespace Telescope2D
                 );
             }
 
+            int oldIndex = index;
 			index = indexForTime;
 			ApplyMomentum(momentums[index]);
+
+			UnifyMomentums(oldIndex);
+            if (index > 0)
+                UnifyMomentums(index - 1);
+            if (index < momentums.Count - 1)
+                UnifyMomentums(index + 1);
         }
 
         public void DigestMomentum(float time)
@@ -86,6 +93,8 @@ namespace Telescope2D
             }
             else
                 momentums[indexForTime] = momentum;
+            
+            UnifyMomentums(indexForTime);
         }
 
         public int PurgeMomentumsNewerThan(float time)
@@ -116,6 +125,8 @@ namespace Telescope2D
 
                 if(oldIndex != index)
                     ApplyMomentum(momentums[index]);
+
+                UnifyMomentums(momentums.Count - 1);
             }
 
             return momentums.Count - indexForTime;
@@ -150,6 +161,8 @@ namespace Telescope2D
 
 				if (oldIndex != index)
 					ApplyMomentum(momentums[index]);
+
+                UnifyMomentums(0);
 			}
 
             return indexForTime + 1;
@@ -173,10 +186,10 @@ namespace Telescope2D
 
             float coeff =   (time - momentums[0].time) 
                           / (momentums[momentums.Count - 1].time - momentums[0].time);
-            
+
             int indexForTime = (int)(Mathf.Clamp(coeff, 0, 1) * (momentums.Count - 1));
 
-            float opMomentumTime = momentums[indexForTime].time;
+			float opMomentumTime = momentums[indexForTime].time;
 
             if (Mathf.Approximately(opMomentumTime, time))
                 return indexForTime;
@@ -208,7 +221,7 @@ namespace Telescope2D
                     done = prevOpMomentumTime < time
                         || Mathf.Approximately(prevOpMomentumTime, time);
                 }
-                return indexForTime;
+				return indexForTime;
             }
 		}
 
@@ -231,6 +244,34 @@ namespace Telescope2D
 			body.velocity = momentum.velocity;
 			body.angularVelocity = momentum.angularVelocity;
 		}
+
+        void UnifyMomentums(int midIndex)
+        {
+            Debug.Assert(midIndex >= 0 && midIndex < momentums.Count);
+            if (midIndex == index) return;
+
+			Momentum2D momentum = momentums[midIndex];
+            int index0 = midIndex;
+            int index1 = midIndex;
+
+            while (     index0 != index
+                   &&   index0 > 0
+                   &&   momentums[index0 - 1].Same(momentum))
+                index0--;
+
+            while (     index1 != index
+				   &&   index1 < momentums.Count - 1
+				   &&   momentums[index1 + 1].Same(momentum))
+				index1++;
+
+            int removeCount = index1 - (index0 + 1);
+            if(removeCount > 0)
+            {
+                if (index >= index1)
+                    index = index - removeCount;
+                momentums.RemoveRange(index0 + 1, removeCount);
+            }
+        }
 	}
 
     public struct Momentum2D : IEquatable<Momentum2D>
@@ -316,11 +357,13 @@ namespace Telescope2D
 
 		public static Momentum2D InterpolateMomentum(float t, Momentum2D a, Momentum2D b)
 		{
-            if (    Mathf.Approximately(a.time, b.time)
+            if (    t >= b.time    
+                ||  Mathf.Approximately(a.time, b.time)
                 ||  Mathf.Approximately(t, b.time))
                 return new Momentum2D(t, b);
 
-            if (Mathf.Approximately(t, a.time))
+            if (    t <= a.time
+                ||  Mathf.Approximately(t, a.time))
                 return new Momentum2D(t, a);
             
             float nt = (t - a.time) / (b.time - a.time);

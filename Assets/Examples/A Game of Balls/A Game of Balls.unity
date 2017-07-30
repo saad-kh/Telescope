@@ -708,7 +708,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   remember: 1
-  foresee: 2
+  foresee: 1
   foreseeChunk: 0.1
 --- !u!4 &1881118163
 Transform:
