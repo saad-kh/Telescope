@@ -70,14 +70,17 @@ namespace Telescope2D
             
             while (!done)
 			{
-				foreach (MomentumTrail2D trail in trails)
-					trail.GoToTime(simulatedTime);
-				
-                Physics2D.Simulate(Time.fixedDeltaTime);
 				simulatedTime += Time.fixedDeltaTime;
+				foreach (MomentumTrail2D trail in trails)
+                    trail.GoToTime(simulatedTime);
+
+                Physics2D.Simulate(Time.fixedDeltaTime);
 
 				foreach (MomentumTrail2D trail in trails)
+                {
                     trail.DigestMomentum(simulatedTime);
+                    trail.SendContactEvents();
+                }
 
 				done = simulatedTime >= foreseen
 	                || Mathf.Approximately(simulatedTime, foreseen);
@@ -85,7 +88,11 @@ namespace Telescope2D
             foreseen = simulatedTime;
 
             foreach (MomentumTrail2D trail in trails)
+            {
                 trail.GoToTime(time);
+                trail.SendContactEvents();
+            }
+                
 		}
 
 		public void BlurSight()
@@ -101,8 +108,11 @@ namespace Telescope2D
 			foreach (Rigidbody2D body in FindObjectsOfType(typeof(Rigidbody2D)))
 			{
 				MomentumTrail2D trail = body.GetComponent<MomentumTrail2D>();
-				if (trail == null)
-					trail = body.gameObject.AddComponent<MomentumTrail2D>();
+                if (trail == null)
+                    trail = body.gameObject.AddComponent<MomentumTrail2D>();
+                else
+                    trail.Clean();
+                
 				trails.Add(trail);
 			}
 
