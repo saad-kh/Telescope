@@ -16,211 +16,236 @@ namespace Telescope2D
         #region Scaffold
         Rigidbody2D body;
 
-        void OnEnable()
+        void Start()
         {
             body = GetComponent<Rigidbody2D>();
-            Clean();
+			momentums = new List<Momentum2D[]>();
+			currentIndex = lastIndex = TrailIndex.zero;
+			Momentum2D[] segment = new Momentum2D[segmentSize];
+			segment[0] = ExtractMomentum((uint)(Time.fixedTime / Time.fixedDeltaTime));
+			momentums.Add(segment);
         }
 
-        public void Clean()
-        {
-            if (momentums == null)
-                momentums = new List<Momentum2D>(suggestedTrailCapacity);
-            else
-                momentums.Clear();
-
-            momentums.Add(ExtractMomentum(Time.fixedTime));
-        }
         #endregion
 
         #region Timeline
-        public int suggestedTrailCapacity = 100;
+        public uint segmentSize = 20;
 
-        int index;
-        List<Momentum2D> momentums;
-
-        public void GoToTime(float time)
+        TrailIndex currentIndex;
+        TrailIndex lastIndex;
+        List<Momentum2D[]> momentums;
+        public Momentum2D first { get { return this[TrailIndex.zero]; } }
+        public Momentum2D current { get { return this[currentIndex]; } }
+        public Momentum2D last { get { return this[lastIndex]; } }
+        Momentum2D this[TrailIndex i]
         {
-            int indexForTime = MomentumIndexForTime(time);
-            float momentumTime = momentums[indexForTime].time;
-
-            if (!Mathf.Approximately(momentumTime, time))
-            {
-                int index0 = indexForTime;
-                int index1 = indexForTime;
-
-                if (momentumTime < time)
-                {
-                    if (indexForTime < momentums.Count - 1)
-                        index1 = indexForTime + 1;
-                    else if (indexForTime > 0)
-                        index0 = indexForTime - 1;
-                    indexForTime++;
-                }
-                else
-                {
-                    if (indexForTime > 0)
-                        index0 = indexForTime - 1;
-                    else if (indexForTime < momentums.Count - 1)
-                        index1 = indexForTime + 1;
-                }
-
-                if (index >= indexForTime)
-                    index = index + 1;
-
-                momentums.Insert(
-                    indexForTime,
-                    Momentum2D.InterpolateMomentum(
-                        time,
-                        momentums[index0],
-                        momentums[index1]
-                    )
-                );
-            }
-
-            int oldIndex = index;
-            index = indexForTime;
-
-            if (oldIndex != index)
-            {
-                ClearContacts();
-                ApplyMomentum(momentums[index]);
-                UnifyMomentums(oldIndex);
-
-                if (index > 0)
-                    UnifyMomentums(index - 1);
-                if (index < momentums.Count - 1)
-                    UnifyMomentums(index + 1);
-            }
-
+            get { return momentums[i.segment][i.momentum]; }
+            set { momentums[i.segment][i.momentum] = value; }
         }
 
-
-
-        public IEnumerable<Momentum2D> MomentumIterator(float startTime = float.NegativeInfinity, float endTime = float.PositiveInfinity)
+        public bool GoToTime(uint tick, uint keepTick = 0)
         {
-            int i = !float.IsNegativeInfinity(startTime) ? MomentumIndexForTime(startTime) : 0;
-            bool checkEnd = !float.IsPositiveInfinity(endTime);
+            TrailIndex i = MomentumIndexForTick(tick);
+            if (i.isInvalid) return false;
 
-            bool done = false;
-            while (!done && i < momentums.Count)
+            if(i != currentIndex)
             {
-                Momentum2D momentum = momentums[i];
-                if (    checkEnd
-                   &&   momentum.time > endTime
-                   &&   !Mathf.Approximately(momentum.time, endTime))
+				ClearContacts();
+                currentIndex = i;
+                ApplyMomentum(this[currentIndex]);
+            }
+
+            uint pastTick = Math.Max(tick - keepTick, 0);
+            int pastSegI = -1;
+            while (  pastSegI + 1 < i.segment
+                  && momentums[pastSegI + 1][0].tick <= pastTick)
+                pastSegI++;
+
+            if(pastSegI > 0){
+                currentIndex = new TrailIndex(
+                    currentIndex.segment - pastSegI,
+                    currentIndex.momentum
+                );
+                lastIndex = new TrailIndex(
+					lastIndex.segment - pastSegI,
+					lastIndex.momentum
+				);
+                momentums.RemoveRange(0, pastSegI);
+            }
+
+            return true;
+        }
+
+        public IEnumerable<Momentum2D> MomentumIterator(uint startTick = 0, uint endTick = uint.MaxValue)
+        {
+            TrailIndex startIndex = startTick > 0 ? MomentumIndexForTick(startTick) : TrailIndex.zero;
+            if (startIndex.isInvalid) yield break;
+
+            bool checkEnd = endTick != uint.MaxValue;
+            int segI = startIndex.segment;
+            int momI = startIndex.momentum;
+			Momentum2D[] segment = momentums[segI];
+            while (segI <= lastIndex.segment && momI <= lastIndex.momentum)
+            {
+                Momentum2D momentum = segment[momI];
+                if (   checkEnd
+                    && momentum.tick > endTick)
                     yield break;
 
                 yield return momentum;
-                i++;
+
+                if (segI == lastIndex.segment && momI == lastIndex.momentum)
+                    yield break;
+
+                if (momI < segment.Length - 1
+                    && segment[momI + 1] != null)
+                    momI++;
+                else
+                {
+                    segment = momentums[++segI];
+                    momI = 0;
+                }
             }
         }
 
-        public Momentum2D MomentumForTime(float time)
+        public Momentum2D MomentumForTick(uint tick)
         {
-            int indexForTime = MomentumIndexForTime(time);
-            Momentum2D momentum = momentums[indexForTime];
-
-            if(     !Mathf.Approximately(momentum.time, time)
-               &&   momentum.time < time 
-               &&   indexForTime < momentums.Count - 1)
-                return Momentum2D.InterpolateMomentum(
-                    time,
-                    momentum,
-                    momentums[indexForTime + 1]
-                );
-
-            return momentum;
+            TrailIndex i = MomentumIndexForTick(tick);
+            if (!i.isInvalid) return null;
+            return this[i];
         }
 
-        int MomentumIndexForTime(float time)
+        TrailIndex MomentumIndexForTick(uint tick)
         {
-            if (Mathf.Approximately(momentums[index].time, time))
-                return index;
+            if (current.tick == tick)
+                return currentIndex;
 
-            if (index != 0
-                && (time <= momentums[0].time
-                    || Mathf.Approximately(momentums[0].time, time)))
-                return 0;
+            if (first.tick == tick)
+                return TrailIndex.zero;
 
-            if (index != momentums.Count - 1
-                && (time >= momentums[momentums.Count - 1].time
-                    || Mathf.Approximately(momentums[momentums.Count - 1].time, time)))
-                return momentums.Count - 1;
+            if (first.tick > tick)
+                return TrailIndex.invalid;
 
-            float coeff = (time - momentums[0].time)
-                          / (momentums[momentums.Count - 1].time - momentums[0].time);
+            if (last.tick <= tick)
+                return lastIndex;
 
-            int indexForTime = (int)(Mathf.Clamp(coeff, 0, 1) * (momentums.Count - 1));
-
-            float opMomentumTime = momentums[indexForTime].time;
-
-            if (Mathf.Approximately(opMomentumTime, time))
-                return indexForTime;
-
-            if (opMomentumTime < time)
+            int segI = currentIndex.segment;
+            int momI = currentIndex.momentum;
+            bool done = false;
+            while(!done)
             {
-                bool done = false;
-                while (!done && indexForTime < momentums.Count - 1)
+                if (momentums[segI][0].tick == tick)
+                    done = true;
+                if (momentums[segI][0].tick < tick)
                 {
-                    float nextOpMomentumTime = momentums[indexForTime + 1].time;
-
-                    if (Mathf.Approximately(nextOpMomentumTime, time))
+                    if (  segI < momentums.Count - 1
+                       && momentums[segI + 1][0].tick <= tick)
                     {
-                        indexForTime++;
-                        done = true;
+                        segI++; 
+                        momI = 0;
                     }
-                    else if (nextOpMomentumTime > time)
-                        done = true;
                     else
-                        indexForTime++;
+                        done = true;
                 }
-                return indexForTime;
-            }
-            else
-            {
-                bool done = false;
-                while (!done && indexForTime > 0)
+                else
                 {
-                    float prevOpMomentumTime = momentums[--indexForTime].time;
-                    done = prevOpMomentumTime < time
-                        || Mathf.Approximately(prevOpMomentumTime, time);
+					if (  segI  > 0
+					   && momentums[segI - 1][0].tick <= tick)
+					{
+						segI--;
+						momI = 0;
+					}
+					else
+						done = true;
                 }
-                return indexForTime;
             }
-        }
 
-        public void DigestMomentum(float time)
-        {
-            Momentum2D momentum = ExtractMomentum(time);
-            int indexForTime = MomentumIndexForTime(time);
-            float momentumTime = momentums[indexForTime].time;
-
-            if (!Mathf.Approximately(momentumTime, time))
+            done = false;
+            Momentum2D[] segment = momentums[segI];
+            while (!done)
             {
-                indexForTime = momentumTime < time
-                    ? indexForTime + 1
-                    : indexForTime;
-
-                index = indexForTime <= index
-                    ? index + 1
-                    : index;
-
-                momentums.Insert(
-                    indexForTime,
-                    momentum
-                );
+                if (segment[momI].tick == tick)
+                    done = true;
+                else if(segment[momI].tick < tick)
+                {
+                    if (  momI < segment.Length - 1
+                       && segment[momI + 1] != null
+                       && segment[momI + 1].tick <= tick)
+                        momI++;
+					else
+						done = true;
+                }
+                else
+                {
+                    if (   momI > 0
+                        && segment[momI - 1].tick <= tick)
+                        momI--;
+					else
+						done = true;
+                }
             }
-            else
-                momentums[indexForTime] = momentum;
 
-            UnifyMomentums(indexForTime);
+            return new TrailIndex(segI, momI);
         }
 
-        Momentum2D ExtractMomentum(float forTime)
+        public void BeginSimulation(uint tick)
+        {
+            lastIndex = MomentumIndexForTick(tick);
+            if(lastIndex.isInvalid) lastIndex = TrailIndex.zero;
+
+            if(currentIndex != lastIndex)
+            {
+                ClearContacts();
+                ApplyMomentum(this[lastIndex]);
+            }
+
+            if (lastIndex.segment < momentums.Count - 1)
+                momentums.RemoveRange(
+                    lastIndex.segment + 1, 
+                    momentums.Count - (lastIndex.segment + 1));
+
+            if(lastIndex.momentum < momentums[lastIndex.segment].Length - 1)
+            {
+                Momentum2D[] segment = momentums[lastIndex.segment];
+                for (int momI = lastIndex.momentum + 1; momI < segment.Length; momI++)
+                    segment[momI] = null;
+            }                   
+        }
+
+        public void EndSimulation(uint tick)
+        {
+            Momentum2D momentum = ExtractMomentum(tick);
+
+            if (currentIndex != lastIndex)
+            {
+                ClearContacts();
+                ApplyMomentum(this[currentIndex]);
+            }
+
+            Momentum2D lastMomentum = this[lastIndex];
+            if (lastMomentum.tick < tick && !lastMomentum.Same(momentum))
+            {
+                Momentum2D[] segment = momentums[lastIndex.segment];
+                if (   lastIndex.momentum + 1 < segment.Length)
+                    lastIndex = new TrailIndex(
+                        lastIndex.segment, 
+                        lastIndex.momentum + 1);
+                else 
+                {
+                    momentums.Add(new Momentum2D[segmentSize]);
+                    lastIndex = new TrailIndex(
+                        lastIndex.segment + 1,
+                        0
+                    );
+                }
+				this[lastIndex] = momentum;
+            }
+        }
+
+        Momentum2D ExtractMomentum(uint tick)
         {
             return new Momentum2D(
-                forTime,
+                tick,
                 transform.position,
                 transform.rotation,
                 body.velocity,
@@ -242,107 +267,6 @@ namespace Telescope2D
             else if (body.IsAwake() && momentum.sleeping)
                 body.Sleep();
         }
-
-
-        public int PurgeMomentumsNewerThan(float time)
-        {
-            int indexForTime = MomentumIndexForTime(time);
-
-            bool done = false;
-            while (!done && indexForTime < momentums.Count)
-            {
-                float momentumTime = momentums[indexForTime].time;
-                if (momentumTime > time && !Mathf.Approximately(momentumTime, time))
-                    done = true;
-                else
-                    indexForTime++;
-            }
-
-            if (indexForTime < momentums.Count)
-            {
-                if (indexForTime == 0)
-                    indexForTime++;
-
-                int oldIndex = index;
-                index = Mathf.Min(index, indexForTime - 1);
-
-                momentums.RemoveRange(
-                    indexForTime,
-                    momentums.Count - indexForTime
-                );
-
-                if (oldIndex != index)
-                    ApplyMomentum(momentums[index]);
-
-                UnifyMomentums(momentums.Count - 1);
-            }
-
-            return momentums.Count - indexForTime;
-        }
-
-        public int PurgeMomentumsOlderThan(float time)
-        {
-            int indexForTime = MomentumIndexForTime(time);
-
-            bool done = false;
-            while (!done && indexForTime >= 0)
-            {
-                float momentumTime = momentums[indexForTime].time;
-                if (momentumTime < time && !Mathf.Approximately(momentumTime, time))
-                    done = true;
-                else
-                    indexForTime--;
-            }
-
-            if (indexForTime >= 0)
-            {
-                if (indexForTime == momentums.Count - 1)
-                    indexForTime--;
-
-                int oldIndex = index;
-                index = Mathf.Max(index - indexForTime, 0);
-
-                momentums.RemoveRange(
-                    0,
-                    indexForTime + 1
-                );
-
-                if (oldIndex != index)
-                    ApplyMomentum(momentums[index]);
-
-                UnifyMomentums(0);
-            }
-
-            return indexForTime + 1;
-        }
-
-        void UnifyMomentums(int midIndex)
-        {
-            Debug.Assert(midIndex >= 0 && midIndex < momentums.Count);
-            if (midIndex == index) return;
-
-            Momentum2D momentum = momentums[midIndex];
-            int index0 = midIndex;
-            int index1 = midIndex;
-
-            while (index0 != index
-                   && index0 > 0
-                   && momentums[index0 - 1].Same(momentum))
-                index0--;
-
-            while (index1 != index
-                   && index1 < momentums.Count - 1
-                   && momentums[index1 + 1].Same(momentum))
-                index1++;
-
-            int removeCount = index1 - (index0 + 1);
-            if (removeCount > 0)
-            {
-                if (index >= index1)
-                    index = index - removeCount;
-                momentums.RemoveRange(index0 + 1, removeCount);
-            }
-        }
         #endregion
 
         #region Contacts
@@ -353,76 +277,86 @@ namespace Telescope2D
         public event Trigger2DEventDelegate TriggerStayEvent;
         public event Trigger2DEventDelegate TriggerExitEvent;
 
-        HashSet<Collision2D> collisionsEnter;
-        HashSet<Collision2D> collisionsStay;
-        HashSet<Collision2D> collisionsExit;
-        HashSet<Collider2D> triggersEnter;
-        HashSet<Collider2D> triggersStay;
-        HashSet<Collider2D> triggersExit;
+        List<Collision2D> collisionsEnter;
+        List<Collision2D> collisionsStay;
+        List<Collision2D> collisionsExit;
+        List<Collider2D> triggersEnter;
+        List<Collider2D> triggersStay;
+        List<Collider2D> triggersExit;
 
         void OnCollisionEnter2D(Collision2D collision)
         {
             if (collisionsEnter == null)
-                collisionsEnter = new HashSet<Collision2D>();
+                collisionsEnter = new List<Collision2D>();
             collisionsEnter.Add(collision);
         }
 
         void OnCollisionStay2D(Collision2D collision)
         {
             if (collisionsStay == null)
-                collisionsStay = new HashSet<Collision2D>();
+                collisionsStay = new List<Collision2D>();
             collisionsStay.Add(collision);
         }
 
         void OnCollisionExit2D(Collision2D collision)
         {
             if (collisionsExit == null)
-                collisionsExit = new HashSet<Collision2D>();
+                collisionsExit = new List<Collision2D>();
             collisionsExit.Add(collision);
         }
 
         void OnTriggerEnter2D(Collider2D collision)
         {
             if (triggersEnter == null)
-                triggersEnter = new HashSet<Collider2D>();
+                triggersEnter = new List<Collider2D>();
             triggersEnter.Add(collision);
         }
 
         void OnTriggerStay2D(Collider2D collision)
         {
             if (triggersStay == null)
-                triggersStay = new HashSet<Collider2D>();
+                triggersStay = new List<Collider2D>();
             triggersStay.Add(collision);
         }
 
         void OnTriggerExit2D(Collider2D collision)
         {
             if (triggersExit == null)
-                triggersExit = new HashSet<Collider2D>();
+                triggersExit = new List<Collider2D>();
             triggersExit.Add(collision);
         }
 
         public void SendContactEvents()
         {
-            Momentum2D momentum = momentums[index];
+            Momentum2D momentum = this[currentIndex];
 
-            if(CollisionEnterEvent != null)
-                momentum.SendCollisionEnterEvents(CollisionEnterEvent);
+            if (CollisionEnterEvent != null)
+                foreach (Collision2D collision in momentum.CollisionEnterIterator())
+                    CollisionEnterEvent(momentum.tick, collision);
 
 			if (CollisionStayEvent != null)
-				momentum.SendCollisionStayEvents(CollisionStayEvent);
+				foreach (Collision2D collision in momentum.CollisionStayIterator())
+					CollisionStayEvent(momentum.tick, collision);
 
 			if (CollisionExitEvent != null)
-				momentum.SendCollisionExitEvents(CollisionExitEvent);
+				foreach (Collision2D collision in momentum.CollisionExitIterator())
+					CollisionExitEvent(momentum.tick, collision);
 
             if (TriggerEnterEvent != null)
-                momentum.SendTriggerEnterEvents(TriggerEnterEvent);
+                foreach (Collider2D collision in momentum.TriggerEnterIterator())
+					TriggerEnterEvent(momentum.tick, collision);
+
+			if (TriggerEnterEvent != null)
+				foreach (Collider2D collision in momentum.TriggerEnterIterator())
+					TriggerEnterEvent(momentum.tick, collision);
 
 			if (TriggerStayEvent != null)
-				momentum.SendTriggerStayEvents(TriggerStayEvent);
-            
+				foreach (Collider2D collision in momentum.TriggerStayIterator())
+					TriggerStayEvent(momentum.tick, collision);
+
 			if (TriggerExitEvent != null)
-				momentum.SendTriggerExitEvents(TriggerExitEvent);
+				foreach (Collider2D collision in momentum.TriggerExitIterator())
+					TriggerExitEvent(momentum.tick, collision);
         }
 
         void ClearContacts()
@@ -438,38 +372,105 @@ namespace Telescope2D
             Debug.Assert(false, "TODO Handle Joint Breaks");
         }
         #endregion
+
+        #region Trail Index Struct
+        struct TrailIndex : IEquatable<TrailIndex>
+        {
+            static public TrailIndex zero = new TrailIndex(0, 0);
+            static public TrailIndex invalid = new TrailIndex(-1, -1);
+            public int segment { get; private set; }
+            public int momentum { get; private set; }
+            public bool isInvalid { get { return segment == -1 || momentum == -1; }}
+
+            public TrailIndex(int segment, int momentum)
+            {
+                this.segment = segment;
+                this.momentum = momentum;
+            }
+
+            public bool Equals(TrailIndex trailIndex)
+            {
+                return this == trailIndex;
+            }
+
+            public override bool Equals(System.Object obj)
+            {
+                return obj is TrailIndex && this == (TrailIndex)obj;
+            }
+
+            public override int GetHashCode()
+            {
+                return segment.GetHashCode() ^ momentum.GetHashCode();
+            }
+
+            public static bool operator ==(TrailIndex x, TrailIndex y)
+            {
+                return (
+                        x.segment == y.segment
+                    && x.momentum == y.segment
+                );
+            }
+
+			public static bool operator !=(TrailIndex x, TrailIndex y)
+			{
+				return !(x == y);
+			}
+
+			public static bool operator < (TrailIndex x, TrailIndex y)
+			{
+                if (x.segment < y.segment) return true;
+                if (x.segment > y.segment) return false;
+                return x.momentum < y.momentum;
+			}
+
+            public static bool operator > (TrailIndex x, TrailIndex y)
+            {
+                return !(x < y) && (x != y);
+            }
+
+			public static bool operator <=(TrailIndex x, TrailIndex y)
+			{
+				return (x < y) || (x == y);
+			}
+
+			public static bool operator >=(TrailIndex x, TrailIndex y)
+			{
+				return (x > y) || (x == y);
+			}
+        }
+        #endregion
     }
 
-    public struct Momentum2D : IEquatable<Momentum2D>
+    public class Momentum2D : IEquatable<Momentum2D>
     {
-        public float time { get; }
+        public uint tick { get; }
         public Vector2 position { get; }
         public Quaternion rotation { get; }
         public Vector2 velocity { get; }
         public float angularVelocity { get; }
         public bool sleeping { get; }
-        ISet<Collision2D> collisionsEnter;
-        ISet<Collision2D> collisionsStay;
-        ISet<Collision2D> collisionsExit;
-        ISet<Collider2D> triggersEnter;
-        ISet<Collider2D> triggersStay;
-        ISet<Collider2D> triggersExit;
+        ICollection<Collision2D> collisionsEnter;
+        ICollection<Collision2D> collisionsStay;
+        ICollection<Collision2D> collisionsExit;
+        ICollection<Collider2D> triggersEnter;
+        ICollection<Collider2D> triggersStay;
+        ICollection<Collider2D> triggersExit;
 
 
         public Momentum2D(
-            float time,
+            uint tick,
             Vector2 position, Quaternion rotation,
             Vector2 velocity, float angularVelocity,
             bool sleeping,
-            ISet<Collision2D> collisionsEnter = null, 
-            ISet<Collision2D> collisionsStay = null,
-            ISet<Collision2D> collisionsExit = null,
-            ISet<Collider2D> triggersEnter = null, 
-            ISet<Collider2D> triggersStay = null, 
-            ISet<Collider2D> triggersExit = null
+            ICollection<Collision2D> collisionsEnter = null, 
+            ICollection<Collision2D> collisionsStay = null,
+            ICollection<Collision2D> collisionsExit = null,
+            ICollection<Collider2D> triggersEnter = null, 
+            ICollection<Collider2D> triggersStay = null, 
+            ICollection<Collider2D> triggersExit = null
         )
         {
-            this.time = time;
+            this.tick = tick;
             this.position = position;
             this.rotation = rotation;
             this.velocity = velocity;
@@ -484,11 +485,11 @@ namespace Telescope2D
         }
 
         public Momentum2D(
-            float time,
+            uint tick,
             Momentum2D source
         )
         {
-            this.time = time;
+            this.tick = tick;
             position = source.position;
             rotation = source.rotation;
             velocity = source.velocity;
@@ -550,67 +551,6 @@ namespace Telescope2D
 				yield return collision;
 		}
 
-        public void SendCollisionEnterEvents(Collision2DEventDelegate collision2DEventDelegate)
-        {
-			if (    collision2DEventDelegate == null
-				||  collisionsEnter == null || collisionsEnter.Count == 0)
-                return;
-            
-            foreach (Collision2D collision in collisionsEnter)
-                collision2DEventDelegate(time, collision);
-        }
-
-        public void SendCollisionStayEvents(Collision2DEventDelegate collision2DEventDelegate)
-        {
-			if (    collision2DEventDelegate == null
-				||  collisionsStay == null || collisionsStay.Count == 0)
-                return;
-
-            foreach (Collision2D collision in collisionsStay)
-                collision2DEventDelegate(time, collision);
-        }
-
-
-        public void SendCollisionExitEvents(Collision2DEventDelegate collision2DEventDelegate)
-        {
-			if (    collision2DEventDelegate == null
-				||  collisionsExit == null || collisionsExit.Count == 0)
-                return;
-
-            foreach (Collision2D collision in collisionsExit)
-                collision2DEventDelegate(time, collision);
-        }
-
-		public void SendTriggerEnterEvents(Trigger2DEventDelegate trigger2DEventDelegate)
-		{
-			if (    trigger2DEventDelegate == null
-				||  triggersEnter == null || triggersEnter.Count == 0)
-				return;
-
-            foreach (Collider2D collision in triggersEnter)
-				trigger2DEventDelegate(time, collision);
-		}
-
-		public void SendTriggerStayEvents(Trigger2DEventDelegate trigger2DEventDelegate)
-		{
-            if (    trigger2DEventDelegate == null 
-                ||  triggersStay == null || triggersStay.Count == 0)
-				return;
-
-			foreach (Collider2D collision in triggersStay)
-				trigger2DEventDelegate(time, collision);
-		}
-
-		public void SendTriggerExitEvents(Trigger2DEventDelegate trigger2DEventDelegate)
-		{
-            if (    trigger2DEventDelegate == null 
-                ||  triggersExit == null || triggersExit.Count == 0)
-				return;
-
-			foreach (Collider2D collision in triggersExit)
-				trigger2DEventDelegate(time, collision);
-		}
-
         public bool Equals(Momentum2D momentum2D)
         {
             return this == momentum2D;
@@ -623,7 +563,7 @@ namespace Telescope2D
 
         public override int GetHashCode()
         {
-            return time.GetHashCode();
+            return tick.GetHashCode();
         }
 
         public bool Same(Momentum2D other)
@@ -633,8 +573,11 @@ namespace Telescope2D
 
         public static bool operator ==(Momentum2D x, Momentum2D y)
         {
+			if (x == null && y == null) return true;
+			if (x == null || y == null) return false;
+
             return (
-                    Mathf.Approximately(x.time, y.time)
+                   x.tick == y.tick
                 && x.position == y.position
                 && x.rotation == y.rotation
                 && x.velocity == y.velocity
@@ -646,8 +589,11 @@ namespace Telescope2D
 
         public static bool Same(Momentum2D x, Momentum2D y)
         {
+			if (x == null && y == null) return true;
+			if (x == null || y == null) return false;
+
             return (
-                    x.position == y.position
+                   x.position == y.position
                 && x.rotation == y.rotation
                 && x.velocity == y.velocity
                 && x.sleeping == y.sleeping
@@ -661,60 +607,36 @@ namespace Telescope2D
             return !(x == y);
         }
 
-        public static bool EqualsContacts(Momentum2D x, Momentum2D y)
+        static bool EqualsContacts(Momentum2D x, Momentum2D y)
         {
             return (
-                    x.collisionsEnter == y.collisionsEnter
-                &&  x.collisionsStay == y.collisionsStay
-                &&  x.collisionsExit == y.collisionsExit
-                &&  x.triggersEnter == y.triggersEnter
-                &&  x.triggersStay == y.triggersStay
-                &&  x.triggersExit == y.triggersExit
+                   x.collisionsEnter == y.collisionsEnter
+                && x.collisionsStay == y.collisionsStay
+                && x.collisionsExit == y.collisionsExit
+                && x.triggersEnter == y.triggersEnter
+                && x.triggersStay == y.triggersStay
+                && x.triggersExit == y.triggersExit
             );
         }
 
-        public static bool SameContacts(Momentum2D x, Momentum2D y)
+        static bool SameContacts(Momentum2D x, Momentum2D y)
         {
             return (
-                    SameSets(x.collisionsEnter, y.collisionsEnter)
-                && SameSets(x.collisionsStay, y.collisionsStay)
-                && SameSets(x.collisionsExit, y.collisionsExit)
-                && SameSets(x.triggersEnter, y.triggersEnter)
-                && SameSets(x.triggersStay, y.triggersStay)
-                && SameSets(x.triggersExit, y.triggersExit)
+                   SameCollections(x.collisionsEnter, y.collisionsEnter)
+                && SameCollections(x.collisionsStay, y.collisionsStay)
+                && SameCollections(x.collisionsExit, y.collisionsExit)
+                && SameCollections(x.triggersEnter, y.triggersEnter)
+                && SameCollections(x.triggersStay, y.triggersStay)
+                && SameCollections(x.triggersExit, y.triggersExit)
             );
         }
 
-        public static bool SameSets<T>(ISet<T> setX, ISet<T> setY)
+        static bool SameCollections<T>(ICollection<T> collectionX, ICollection<T> collectionY)
         {
-            if (setX == null && setY == null) return true;
-            if (setX == null || setY == null) return false;
-            if (setX.Count != setY.Count) return false;
-            return !setX.Except(setY).Any();
-        }
-
-        public static Momentum2D InterpolateMomentum(float t, Momentum2D a, Momentum2D b)
-        {
-            if (t >= b.time
-                || Mathf.Approximately(a.time, b.time)
-                || Mathf.Approximately(t, b.time))
-                return new Momentum2D(t, b);
-
-            if (t <= a.time
-                || Mathf.Approximately(t, a.time))
-                return new Momentum2D(t, a);
-
-            float nt = (t - a.time) / (b.time - a.time);
-            return new Momentum2D(
-                t,
-                Vector2.LerpUnclamped(a.position, b.position, nt),
-                Quaternion.LerpUnclamped(a.rotation, b.rotation, nt),
-                Vector2.LerpUnclamped(a.velocity, b.velocity, nt),
-                Mathf.LerpUnclamped(a.angularVelocity, b.angularVelocity, nt),
-                a.sleeping && b.sleeping,
-                null, a.collisionsStay, null,
-                null, a.triggersStay, null
-            );
+            if (collectionX == null && collectionY == null) return true;
+            if (collectionX == null || collectionY == null) return false;
+            if (collectionX.Count != collectionY.Count) return false;
+            return !collectionX.Except(collectionY).Any();
         }
     }
 }

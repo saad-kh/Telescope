@@ -48,6 +48,7 @@ namespace Telescope2D
 				CleanGlass(time);
 
 			float simulatedTime = foreseen;
+            uint simulatedTick = (uint)(simulatedTime / Time.fixedDeltaTime);
 
 			remembered = Mathf.Max(
                 time - (remembering ? remember : 0),
@@ -58,38 +59,29 @@ namespace Telescope2D
                 simulatedTime + (foreseeing ? foreseeChunk : Time.fixedDeltaTime),
 				time + foresee
 			);
+            uint foreseenTick = (uint)(foreseen / Time.fixedDeltaTime);
 
-            foreach (MomentumTrail2D trail in trails)
-            {
-				trail.PurgeMomentumsOlderThan(remembered);
-				trail.PurgeMomentumsNewerThan(simulatedTime);
-            }
-
-			bool done = simulatedTime >= foreseen
-					|| Mathf.Approximately(simulatedTime, foreseen);
-            
-            while (!done)
+            while (simulatedTick < foreseenTick)
 			{
-				simulatedTime += Time.fixedDeltaTime;
+                simulatedTick++;
 				foreach (MomentumTrail2D trail in trails)
-                    trail.GoToTime(simulatedTime);
+                    trail.BeginSimulation(simulatedTick);
 
                 Physics2D.Simulate(Time.fixedDeltaTime);
 
 				foreach (MomentumTrail2D trail in trails)
                 {
-                    trail.DigestMomentum(simulatedTime);
+                    trail.EndSimulation(simulatedTick);
                     trail.SendContactEvents();
                 }
-
-				done = simulatedTime >= foreseen
-	                || Mathf.Approximately(simulatedTime, foreseen);
 			}
             foreseen = simulatedTime;
 
+            uint tick = (uint)(time / Time.fixedDeltaTime);
+            uint keepTick = tick - (uint)(remembered / Time.fixedDeltaTime);
             foreach (MomentumTrail2D trail in trails)
             {
-                trail.GoToTime(time);
+                trail.GoToTime(tick, keepTick);
                 trail.SendContactEvents();
             }
                 
@@ -104,14 +96,16 @@ namespace Telescope2D
 		{
 			foreseen = currentTime;
 
-			trails = new HashSet<MomentumTrail2D>();
+            if (trails == null)
+                trails = new HashSet<MomentumTrail2D>();
+            else
+                trails.Clear();
+            
 			foreach (Rigidbody2D body in FindObjectsOfType(typeof(Rigidbody2D)))
 			{
 				MomentumTrail2D trail = body.GetComponent<MomentumTrail2D>();
                 if (trail == null)
                     trail = body.gameObject.AddComponent<MomentumTrail2D>();
-                else
-                    trail.Clean();
                 
 				trails.Add(trail);
 			}
