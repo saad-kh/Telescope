@@ -75,8 +75,6 @@ namespace Telescope2D
                     trail.SendContactEvents();
                 }
 			}
-            foreseen = simulatedTime;
-
             uint tick = (uint)(time / Time.fixedDeltaTime);
             uint keepTick = tick - (uint)(remembered / Time.fixedDeltaTime);
             foreach (MomentumTrail2D trail in trails)
