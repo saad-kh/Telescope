@@ -13,14 +13,20 @@ namespace Telescope2D
 		public float foreseeChunk = 0.1f;
 
 		public bool clearSight { get; private set; } = false;
-		public float time { get; private set; } = 0f;
+        public bool clearKnowledge { get; private set; } = false;
+        public float time { get; private set; } = 0f;
 		public float remembered { get; private set; } = 0f;
 		public float foreseen { get; private set; } = 0f;
 
 		HashSet<MomentumTrail2D> trails;
 
-		// Use this for initialization
-		void OnEnable()
+        // Use this for initialization
+        void Awake()
+        {
+            trails = new HashSet<MomentumTrail2D>();
+        }
+
+        void OnEnable()
 		{
 			if (Physics2D.autoSimulation)
 			{
@@ -85,28 +91,35 @@ namespace Telescope2D
                 
 		}
 
-		public void BlurSight()
+        public void BlurSight()
 		{
 			clearSight = false;
 		}
 
-		void CleanGlass(float currentTime)
+        public void BlurKnowledge()
+        {
+            clearSight = false;
+            clearKnowledge = false;
+        }
+
+        void CleanGlass(float currentTime)
 		{
 			foreseen = currentTime;
-
-            if (trails == null)
-                trails = new HashSet<MomentumTrail2D>();
-            else
-                trails.Clear();
             
-			foreach (Rigidbody2D body in FindObjectsOfType(typeof(Rigidbody2D)))
-			{
-				MomentumTrail2D trail = body.GetComponent<MomentumTrail2D>();
-                if (trail == null)
-                    trail = body.gameObject.AddComponent<MomentumTrail2D>();
-                
-				trails.Add(trail);
-			}
+            if(!clearKnowledge)
+            {
+                trails.Clear();
+                foreach (Rigidbody2D body in FindObjectsOfType(typeof(Rigidbody2D)))
+                {
+                    MomentumTrail2D trail = body.GetComponent<MomentumTrail2D>();
+                    if (trail == null)
+                        trail = body.gameObject.AddComponent<MomentumTrail2D>();
+
+                    trails.Add(trail);
+                }
+                clearKnowledge = true;
+            }
+			
 
 			clearSight = true;
 		}

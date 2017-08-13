@@ -45,40 +45,32 @@ namespace Telescope2D
 
         public bool GoToTime(uint tick, uint keepTick = 0)
         {
+            TrailIndex i;
             if(this[currentIndex].tick + 1 == tick)
             {
                 if (currentIndex.momentum < momentums[currentIndex.segment].Length - 1)
                 {
                     if (momentums[currentIndex.segment][currentIndex.momentum + 1] != null)
-                        return GoToIndex(new TrailIndex(currentIndex.segment, currentIndex.momentum + 1));
+                        i = new TrailIndex(currentIndex.segment, currentIndex.momentum + 1);
                     else
                         return false;
                 }
                 else
                 {
                     if (currentIndex.segment < momentums.Count - 1)
-                        return GoToIndex(new TrailIndex(currentIndex.segment + 1, 0));
+                        i = new TrailIndex(currentIndex.segment + 1, 0);
                     else
                         return false;
                 }
             }
-            return GoToIndex(MomentumIndexForTick(tick));
-        }
+            else
+                i = MomentumIndexForTick(tick);
 
-        private bool GoToIndex(TrailIndex i, uint keepTick = 0)
-        {
-            if (i.isInvalid) return false;
+            bool success = GoToIndex(i);
 
-            if (i != currentIndex)
-            {
-                ClearContacts();
-                currentIndex = i;
-                ApplyMomentum(this[currentIndex]);
-            }
-
-            uint pastTick = Math.Max(this[i].tick - keepTick, 0);
+            uint pastTick = Math.Max(tick - keepTick, 0);
             int pastSegI = 0;
-            while (pastSegI + 1 < i.segment
+            while (pastSegI + 1 <= i.segment
                   && momentums[pastSegI + 1][0].tick <= pastTick)
                 pastSegI++;
 
@@ -101,6 +93,20 @@ namespace Telescope2D
                     }
 
                 momentums.RemoveRange(0, pastSegI);
+            }
+
+            return success;
+        }
+
+        private bool GoToIndex(TrailIndex i)
+        {
+            if (i.isInvalid) return false;
+
+            if (i != currentIndex)
+            {
+                ClearContacts();
+                currentIndex = i;
+                ApplyMomentum(this[currentIndex]);
             }
 
             return true;
@@ -248,19 +254,14 @@ namespace Telescope2D
 
         public void EndSimulation(uint tick)
         {
-            Momentum2D momentum = ExtractMomentum(tick);
-
-            ClearContacts();
-            ApplyMomentum(this[currentIndex]);
-
-            if (this[lastIndex].tick < tick && !this[lastIndex].Same(momentum))
+            if (this[lastIndex].tick < tick && HasSimulationChangedLast())
             {
                 Momentum2D[] segment = momentums[lastIndex.segment];
-                if (   lastIndex.momentum + 1 < segment.Length)
+                if (lastIndex.momentum + 1 < segment.Length)
                     lastIndex = new TrailIndex(
-                        lastIndex.segment, 
+                        lastIndex.segment,
                         lastIndex.momentum + 1);
-                else 
+                else
                 {
                     momentums.Add(new Momentum2D[segmentSize]);
                     lastIndex = new TrailIndex(
@@ -269,8 +270,11 @@ namespace Telescope2D
                     );
                 }
 
-                this[lastIndex] = momentum;
+                this[lastIndex] = ExtractMomentum(tick);
             }
+
+            ClearContacts();
+            ApplyMomentum(this[currentIndex]);
         }
 
         Momentum2D ExtractMomentum(uint tick)
@@ -289,14 +293,32 @@ namespace Telescope2D
 
         void ApplyMomentum(Momentum2D momentum)
         {
-            transform.position = momentum.position;
-            transform.rotation = momentum.rotation;
+            transform.SetPositionAndRotation(
+                momentum.position,
+                momentum.rotation
+            );
             body.velocity = momentum.velocity;
             body.angularVelocity = momentum.angularVelocity;
             if (body.IsSleeping() && !momentum.sleeping)
                 body.WakeUp();
             else if (body.IsAwake() && momentum.sleeping)
                 body.Sleep();
+        }
+
+        bool HasSimulationChangedLast()
+        {
+            Momentum2D last = this.last;
+            return (
+                   (Vector2)(transform.position) != last.position
+                || transform.rotation != last.rotation
+                || body.velocity != last.velocity
+                || !Mathf.Approximately(body.angularVelocity, last.angularVelocity)
+                || body.IsSleeping() != last.sleeping
+                || collisionsEnter != null || collisionsExit != null
+                || triggersEnter != null || triggersExit != null
+                || !last.HasSameCollisionsStay(collisionsStay)
+                || !last.HasSameTriggersStay(triggersStay)
+                );
         }
         #endregion
 
@@ -446,28 +468,6 @@ namespace Telescope2D
 			{
 				return !(x == y);
 			}
-
-			public static bool operator < (TrailIndex x, TrailIndex y)
-			{
-                if (x.segment < y.segment) return true;
-                if (x.segment > y.segment) return false;
-                return x.momentum < y.momentum;
-			}
-
-            public static bool operator > (TrailIndex x, TrailIndex y)
-            {
-                return !(x < y) && (x != y);
-            }
-
-			public static bool operator <=(TrailIndex x, TrailIndex y)
-			{
-				return (x < y) || (x == y);
-			}
-
-			public static bool operator >=(TrailIndex x, TrailIndex y)
-			{
-				return !(x < y);
-			}
         }
         #endregion
     }
@@ -572,18 +572,20 @@ namespace Telescope2D
             return this;
         }
 
-        public Momentum2D Clean()
+        public bool HasSameCollisionsStay(List<Collision2D> collisions)
         {
-            tick = default(uint);
-            position = default(Vector2);
-            rotation = default(Quaternion);
-            velocity = default(Vector2);
-            angularVelocity = default(float);
-            sleeping = default(bool);
-            collisionsEnter = collisionsStay = collisionsExit = null;
-            triggersEnter = triggersStay = triggersExit = null;
+            if (collisionsStay == collisions) return true;
+            if (collisionsStay == null ^ collisions == null) return false;
+            if (collisionsStay.Count != collisions.Count) return false;
+            return !collisionsStay.Except(collisions).Any();
+        }
 
-            return this;
+        public bool HasSameTriggersStay(List<Collider2D> collisions)
+        {
+            if (triggersStay == collisions) return true;
+            if (triggersStay == null ^ collisions == null) return false;
+            if (triggersStay.Count != collisions.Count) return false;
+            return !triggersStay.Except(collisions).Any();
         }
 
         public IEnumerable<Collision2D> CollisionEnterIterator()
@@ -650,45 +652,16 @@ namespace Telescope2D
             return tick.GetHashCode();
         }
 
-        public bool Same(Momentum2D other)
-        {
-            return Same(this, other);
-        }
-
-        public static bool Same(Momentum2D x, Momentum2D y)
-        {
-            return (
-                   x.position == y.position
-                && x.rotation == y.rotation
-                && x.velocity == y.velocity
-                && x.sleeping == y.sleeping
-                && Mathf.Approximately(x.angularVelocity, y.angularVelocity)
-                && SameContacts(x, y)
-            );
-        }
-
-        static bool SameContacts(Momentum2D x, Momentum2D y)
-        {
-            return (
-                   x.collisionsEnter == y.collisionsEnter
-                && x.collisionsExit == y.collisionsExit
-                && x.triggersEnter == y.triggersEnter
-                && x.triggersExit == y.triggersExit
-                && SameCollections(x.collisionsStay, y.collisionsStay)
-                && SameCollections(x.triggersStay, y.triggersStay)
-            );
-        }
-
-        static bool SameCollections<T>(ICollection<T> collectionX, ICollection<T> collectionY)
-        {
-            if (collectionX == collectionY) return true;
-            if (collectionX == null ^ collectionY == null) return false;
-            if (collectionX.Count != collectionY.Count) return false;
-            return !collectionX.Except(collectionY).Any();
-        }
-
-        public static uint poolSize = 100;
+        public static uint poolSize = 50;
         private static Stack<Momentum2D> pool;
+
+        Momentum2D Clean()
+        {
+            collisionsEnter = collisionsStay = collisionsExit = null;
+            triggersEnter = triggersStay = triggersExit = null;
+
+            return this;
+        }
 
         public static Momentum2D GetMomentum(
             uint tick,
