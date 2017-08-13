@@ -10,7 +10,6 @@ namespace Telescope2D
     public delegate void Trigger2DEventDelegate(float time, Collider2D collisions);
     #endregion
 
-    [HideInInspector]
     [RequireComponent(typeof(Rigidbody2D))]
     public class MomentumTrail2D : MonoBehaviour
     {
@@ -34,7 +33,7 @@ namespace Telescope2D
 
         TrailIndex currentIndex;
         TrailIndex lastIndex;
-        List<Momentum2D[]> momentums;
+        public List<Momentum2D[]> momentums;
         public Momentum2D first { get { return this[TrailIndex.zero]; } }
         public Momentum2D current { get { return this[currentIndex]; } }
         public Momentum2D last { get { return this[lastIndex]; } }
@@ -77,12 +76,13 @@ namespace Telescope2D
                 momentums.RemoveRange(0, pastSegI);
             }
 
+                
             return success;
         }
 
         bool GoToIndex(TrailIndex i)
         {
-            if (i.isInvalid) return false;
+            if (!i.valid) return false;
 
             if (i != currentIndex)
             {
@@ -97,7 +97,7 @@ namespace Telescope2D
         public IEnumerable<Momentum2D> MomentumIterator(uint startTick = 0, uint endTick = uint.MaxValue)
         {
             TrailIndex startIndex = startTick > 0 ? MomentumIndexForTick(startTick) : TrailIndex.zero;
-            if (startIndex.isInvalid) yield break;
+            if (!startIndex.valid) yield break;
 
             bool checkEnd = endTick != uint.MaxValue;
             int segI = startIndex.segment;
@@ -129,7 +129,7 @@ namespace Telescope2D
         public Momentum2D MomentumForTick(uint tick)
         {
             TrailIndex i = MomentumIndexForTick(tick);
-            if (i.isInvalid) throw new ArgumentOutOfRangeException(
+            if (!i.valid) throw new ArgumentOutOfRangeException(
                 $"{nameof(tick)} should be higher than the oldest {nameof(tick)} of {nameof(MomentumTrail2D)}"
                );
             return this[i];
@@ -211,7 +211,7 @@ namespace Telescope2D
         public void BeginSimulation(uint tick)
         {
             lastIndex = MomentumIndexForTick(tick);
-            if(lastIndex.isInvalid) lastIndex = TrailIndex.zero;
+            if(!lastIndex.valid) lastIndex = TrailIndex.zero;
 
             if(currentIndex != lastIndex)
             {
@@ -308,6 +308,7 @@ namespace Telescope2D
                 || !last.HasSameTriggersStay(triggersStay)
                 );
         }
+
         #endregion
 
         #region Contacts
@@ -417,7 +418,7 @@ namespace Telescope2D
             static public TrailIndex invalid = new TrailIndex(-1, -1);
             public int segment { get; private set; }
             public int momentum { get; private set; }
-            public bool isInvalid { get { return segment == -1 || momentum == -1; }}
+            public bool valid { get { return segment >= 0 && momentum >= 0; }}
 
             public TrailIndex(int segment, int momentum)
             {

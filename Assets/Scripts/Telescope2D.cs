@@ -105,8 +105,10 @@ namespace Telescope2D
         void CleanGlass(float currentTime)
 		{
 			foreseen = currentTime;
-            
-            if(!clearKnowledge)
+
+            MomentumTrail2D.segmentSize = (uint)(foreseeChunk / Time.fixedDeltaTime);
+
+            if (!clearKnowledge)
             {
                 trails.Clear();
                 foreach (Rigidbody2D body in FindObjectsOfType(typeof(Rigidbody2D)))
@@ -119,7 +121,13 @@ namespace Telescope2D
                 }
                 clearKnowledge = true;
             }
-			clearSight = true;
+
+            Momentum2D.poolSize = (uint)Mathf.Min(
+                MomentumTrail2D.segmentSize * trails.Count,
+                200
+            );
+
+            clearSight = true;
 		}
 
 	}
