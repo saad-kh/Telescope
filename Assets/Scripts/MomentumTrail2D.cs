@@ -10,6 +10,7 @@ namespace Telescope2D
     public delegate void Trigger2DEventDelegate(float time, Collider2D collisions);
     #endregion
 
+    [HideInInspector]
     [RequireComponent(typeof(Rigidbody2D))]
     public class MomentumTrail2D : MonoBehaviour
     {
@@ -29,7 +30,7 @@ namespace Telescope2D
         #endregion
 
         #region Timeline
-        public uint segmentSize = 20;
+        public static uint segmentSize = 20;
 
         TrailIndex currentIndex;
         TrailIndex lastIndex;
@@ -45,26 +46,7 @@ namespace Telescope2D
 
         public bool GoToTime(uint tick, uint keepTick = 0)
         {
-            TrailIndex i;
-            if(this[currentIndex].tick + 1 == tick)
-            {
-                if (currentIndex.momentum < momentums[currentIndex.segment].Length - 1)
-                {
-                    if (momentums[currentIndex.segment][currentIndex.momentum + 1] != null)
-                        i = new TrailIndex(currentIndex.segment, currentIndex.momentum + 1);
-                    else
-                        return false;
-                }
-                else
-                {
-                    if (currentIndex.segment < momentums.Count - 1)
-                        i = new TrailIndex(currentIndex.segment + 1, 0);
-                    else
-                        return false;
-                }
-            }
-            else
-                i = MomentumIndexForTick(tick);
+            TrailIndex i = MomentumIndexForTick(tick);
 
             bool success = GoToIndex(i);
 
@@ -98,7 +80,7 @@ namespace Telescope2D
             return success;
         }
 
-        private bool GoToIndex(TrailIndex i)
+        bool GoToIndex(TrailIndex i)
         {
             if (i.isInvalid) return false;
 
@@ -147,7 +129,7 @@ namespace Telescope2D
         public Momentum2D MomentumForTick(uint tick)
         {
             TrailIndex i = MomentumIndexForTick(tick);
-            if (!i.isInvalid) throw new ArgumentOutOfRangeException(
+            if (i.isInvalid) throw new ArgumentOutOfRangeException(
                 $"{nameof(tick)} should be higher than the oldest {nameof(tick)} of {nameof(MomentumTrail2D)}"
                );
             return this[i];
@@ -254,7 +236,8 @@ namespace Telescope2D
 
         public void EndSimulation(uint tick)
         {
-            if (this[lastIndex].tick < tick && HasSimulationChangedLast())
+            bool update = HasSimulationChangedLast();
+            if (this[lastIndex].tick < tick && update)
             {
                 Momentum2D[] segment = momentums[lastIndex.segment];
                 if (lastIndex.momentum + 1 < segment.Length)
@@ -269,12 +252,18 @@ namespace Telescope2D
                         0
                     );
                 }
-
-                this[lastIndex] = ExtractMomentum(tick);
             }
 
-            ClearContacts();
-            ApplyMomentum(this[currentIndex]);
+            if(update)
+			    this[lastIndex] = ExtractMomentum(tick);
+
+            if(currentIndex != lastIndex)
+            {
+				ClearContacts();
+				ApplyMomentum(this[currentIndex]);
+            }
+
+
         }
 
         Momentum2D ExtractMomentum(uint tick)
@@ -307,7 +296,6 @@ namespace Telescope2D
 
         bool HasSimulationChangedLast()
         {
-            Momentum2D last = this.last;
             return (
                    (Vector2)(transform.position) != last.position
                 || transform.rotation != last.rotation
@@ -379,37 +367,33 @@ namespace Telescope2D
             triggersExit.Add(collision);
         }
 
-        public void SendContactEvents()
+        public void SendContactEvents(uint tick)
         {
-            Momentum2D momentum = this[currentIndex];
+            Momentum2D momentum = MomentumForTick(tick);
 
-            if (CollisionEnterEvent != null)
-                foreach (Collision2D collision in momentum.CollisionEnterIterator())
-                    CollisionEnterEvent(momentum.tick, collision);
+            if (CollisionEnterEvent != null && momentum.collisionsEnter != null)
+                foreach (Collision2D collision in momentum.collisionsEnter)
+                    CollisionEnterEvent(tick, collision);
 
-			if (CollisionStayEvent != null)
-				foreach (Collision2D collision in momentum.CollisionStayIterator())
-					CollisionStayEvent(momentum.tick, collision);
+			if (CollisionStayEvent != null && momentum.collisionsStay != null)
+                foreach (Collision2D collision in momentum.collisionsStay)
+					CollisionStayEvent(tick, collision);
 
-			if (CollisionExitEvent != null)
-				foreach (Collision2D collision in momentum.CollisionExitIterator())
-					CollisionExitEvent(momentum.tick, collision);
+            if (CollisionExitEvent != null && momentum.collisionsExit != null)
+                foreach (Collision2D collision in momentum.collisionsExit)
+					CollisionExitEvent(tick, collision);
 
-            if (TriggerEnterEvent != null)
-                foreach (Collider2D collision in momentum.TriggerEnterIterator())
-					TriggerEnterEvent(momentum.tick, collision);
+            if (TriggerEnterEvent != null && momentum.triggersEnter != null)
+                foreach (Collider2D collision in momentum.triggersEnter)
+					TriggerEnterEvent(tick, collision);
 
-			if (TriggerEnterEvent != null)
-				foreach (Collider2D collision in momentum.TriggerEnterIterator())
-					TriggerEnterEvent(momentum.tick, collision);
+            if (TriggerStayEvent != null && momentum.triggersStay != null)
+				foreach (Collider2D collision in momentum.triggersStay)
+					TriggerStayEvent(tick, collision);
 
-			if (TriggerStayEvent != null)
-				foreach (Collider2D collision in momentum.TriggerStayIterator())
-					TriggerStayEvent(momentum.tick, collision);
-
-			if (TriggerExitEvent != null)
-				foreach (Collider2D collision in momentum.TriggerExitIterator())
-					TriggerExitEvent(momentum.tick, collision);
+            if (TriggerExitEvent != null && momentum.triggersExit != null)
+                foreach (Collider2D collision in momentum.triggersExit)
+					TriggerExitEvent(tick, collision);
         }
 
         void ClearContacts()
@@ -481,29 +465,26 @@ namespace Telescope2D
         public Vector2 velocity { get; private set; }
         public float angularVelocity { get; private set; }
         public bool sleeping { get; private set; }
-        ICollection<Collision2D> collisionsEnter;
-        ICollection<Collision2D> collisionsStay;
-        ICollection<Collision2D> collisionsExit;
-        ICollection<Collider2D> triggersEnter;
-        ICollection<Collider2D> triggersStay;
-        ICollection<Collider2D> triggersExit;
+        public IEnumerable<Collision2D> collisionsEnter { get; private set; }
+        public IEnumerable<Collision2D> collisionsStay { get; private set; }
+        public IEnumerable<Collision2D> collisionsExit { get; private set; }
+        public IEnumerable<Collider2D> triggersEnter { get; private set; }
+        public IEnumerable<Collider2D> triggersStay { get; private set; }
+        public IEnumerable<Collider2D> triggersExit { get; private set; }
 
-        private Momentum2D()
-        {
-
-        }
+        Momentum2D() { }
 
         public Momentum2D(
             uint tick,
             Vector2 position, Quaternion rotation,
             Vector2 velocity, float angularVelocity,
             bool sleeping,
-            ICollection<Collision2D> collisionsEnter = null, 
-            ICollection<Collision2D> collisionsStay = null,
-            ICollection<Collision2D> collisionsExit = null,
-            ICollection<Collider2D> triggersEnter = null, 
-            ICollection<Collider2D> triggersStay = null, 
-            ICollection<Collider2D> triggersExit = null
+            IEnumerable<Collision2D> collisionsEnter = null,
+            IEnumerable<Collision2D> collisionsStay = null,
+            IEnumerable<Collision2D> collisionsExit = null,
+            IEnumerable<Collider2D> triggersEnter = null,
+            IEnumerable<Collider2D> triggersStay = null,
+            IEnumerable<Collider2D> triggersExit = null
         )
         {
             Populate(
@@ -523,40 +504,40 @@ namespace Telescope2D
             Populate(tick, source);
         }
 
-        private Momentum2D Populate(
-            uint tick,
-            Vector2 position, Quaternion rotation,
-            Vector2 velocity, float angularVelocity,
-            bool sleeping,
-            ICollection<Collision2D> collisionsEnter = null,
-            ICollection<Collision2D> collisionsStay = null,
-            ICollection<Collision2D> collisionsExit = null,
-            ICollection<Collider2D> triggersEnter = null,
-            ICollection<Collider2D> triggersStay = null,
-            ICollection<Collider2D> triggersExit = null)
+        Momentum2D Populate(
+            uint pTick,
+            Vector2 pPosition, Quaternion pRotation,
+            Vector2 pVelocity, float pAngularVelocity,
+            bool pSleeping,
+            IEnumerable<Collision2D> pCollisionsEnter = null,
+            IEnumerable<Collision2D> pCollisionsStay = null,
+            IEnumerable<Collision2D> pCollisionsExit = null,
+            IEnumerable<Collider2D> pTriggersEnter = null,
+            IEnumerable<Collider2D> pTriggersStay = null,
+            IEnumerable<Collider2D> pTriggersExit = null)
         {
-            this.tick = tick;
-            this.position = position;
-            this.rotation = rotation;
-            this.velocity = velocity;
-            this.angularVelocity = angularVelocity;
-            this.sleeping = sleeping;
-            this.collisionsEnter = collisionsEnter;
-            this.collisionsStay = collisionsStay;
-            this.collisionsExit = collisionsExit;
-            this.triggersEnter = triggersEnter;
-            this.triggersStay = triggersStay;
-            this.triggersExit = triggersExit;
+            tick = pTick;
+            position = pPosition;
+            rotation = pRotation;
+            velocity = pVelocity;
+            angularVelocity = pAngularVelocity;
+            sleeping = pSleeping;
+            collisionsEnter = pCollisionsEnter;
+            collisionsStay = pCollisionsStay;
+            collisionsExit = pCollisionsExit;
+            triggersEnter = pTriggersEnter;
+            triggersStay = pTriggersStay;
+            triggersExit = pTriggersExit;
 
             return this;
         }
 
-        private Momentum2D Populate(
-            uint tick,
+        Momentum2D Populate(
+            uint pTick,
             Momentum2D source
         )
         {
-            this.tick = tick;
+            tick = pTick;
             position = source.position;
             rotation = source.rotation;
             velocity = source.velocity;
@@ -576,7 +557,6 @@ namespace Telescope2D
         {
             if (collisionsStay == collisions) return true;
             if (collisionsStay == null ^ collisions == null) return false;
-            if (collisionsStay.Count != collisions.Count) return false;
             return !collisionsStay.Except(collisions).Any();
         }
 
@@ -584,57 +564,8 @@ namespace Telescope2D
         {
             if (triggersStay == collisions) return true;
             if (triggersStay == null ^ collisions == null) return false;
-            if (triggersStay.Count != collisions.Count) return false;
             return !triggersStay.Except(collisions).Any();
         }
-
-        public IEnumerable<Collision2D> CollisionEnterIterator()
-        {
-            if (collisionsEnter == null || collisionsEnter.Count == 0)
-                yield break;
-            foreach (Collision2D collision in collisionsEnter)
-                yield return collision;
-        }
-
-		public IEnumerable<Collision2D> CollisionStayIterator()
-		{
-			if (collisionsStay == null || collisionsStay.Count == 0)
-				yield break;
-			foreach (Collision2D collision in collisionsStay)
-				yield return collision;
-		}
-
-		public IEnumerable<Collision2D> CollisionExitIterator()
-		{
-			if (collisionsExit == null || collisionsExit.Count == 0)
-				yield break;
-			foreach (Collision2D collision in collisionsExit)
-				yield return collision;
-		}
-
-		public IEnumerable<Collider2D> TriggerEnterIterator()
-		{
-			if (triggersEnter == null || triggersEnter.Count == 0)
-				yield break;
-			foreach (Collider2D collision in triggersEnter)
-				yield return collision;
-		}
-
-		public IEnumerable<Collider2D> TriggerStayIterator()
-		{
-			if (triggersStay == null || triggersStay.Count == 0)
-				yield break;
-			foreach (Collider2D collision in triggersStay)
-				yield return collision;
-		}
-
-        public IEnumerable<Collider2D> TriggerExitIterator()
-		{
-			if (triggersExit == null || triggersExit.Count == 0)
-				yield break;
-            foreach (Collider2D collision in triggersExit)
-				yield return collision;
-		}
 
         public bool Equals(Momentum2D momentum2D)
         {
@@ -643,7 +574,7 @@ namespace Telescope2D
 
         public override bool Equals(System.Object obj)
         {
-            return obj is Momentum2D 
+            return obj is Momentum2D
                 && ReferenceEquals(this, (Momentum2D)obj);
         }
 
@@ -652,28 +583,28 @@ namespace Telescope2D
             return tick.GetHashCode();
         }
 
+		Momentum2D Clean()
+		{
+			collisionsEnter = collisionsStay = collisionsExit = null;
+			triggersEnter = triggersStay = triggersExit = null;
+
+			return this;
+		}
+
         public static uint poolSize = 50;
-        private static Stack<Momentum2D> pool;
-
-        Momentum2D Clean()
-        {
-            collisionsEnter = collisionsStay = collisionsExit = null;
-            triggersEnter = triggersStay = triggersExit = null;
-
-            return this;
-        }
+        static Stack<Momentum2D> pool;
 
         public static Momentum2D GetMomentum(
             uint tick,
             Vector2 position, Quaternion rotation,
             Vector2 velocity, float angularVelocity,
             bool sleeping,
-            ICollection<Collision2D> collisionsEnter = null,
-            ICollection<Collision2D> collisionsStay = null,
-            ICollection<Collision2D> collisionsExit = null,
-            ICollection<Collider2D> triggersEnter = null,
-            ICollection<Collider2D> triggersStay = null,
-            ICollection<Collider2D> triggersExit = null)
+            IEnumerable<Collision2D> collisionsEnter = null,
+            IEnumerable<Collision2D> collisionsStay = null,
+            IEnumerable<Collision2D> collisionsExit = null,
+            IEnumerable<Collider2D> triggersEnter = null,
+            IEnumerable<Collider2D> triggersStay = null,
+            IEnumerable<Collider2D> triggersExit = null)
         {
             return GetMomentum().Populate(
                 tick,
@@ -692,32 +623,31 @@ namespace Telescope2D
             return GetMomentum().Populate(tick, source);
         }
 
-        private static Momentum2D GetMomentum()
+        static Momentum2D GetMomentum()
         {
             if (pool != null && pool.Count > 0)
                 return pool.Pop();
 
-            else return new Momentum2D();
+            return new Momentum2D();
         }
 
-        public static void Release(Momentum2D[] momentums)
+        public static bool Release(Momentum2D[] momentums)
         {
-            if (IsPoolFull()) return;
             foreach (Momentum2D momentum in momentums)
-            {
-                Release(momentum);
-                if (IsPoolFull()) break;
-            }
+                if(!Release(momentum)) break;
+
+            return pool.Count < poolSize;
         }
 
-        public static void Release(Momentum2D momentum)
+        public static bool Release(Momentum2D momentum)
         {
-            if (momentum == null) return;
-            if (pool != null && pool.Count >= poolSize) return;
+            if (pool != null && pool.Count >= poolSize) return false;
+			if (momentum == null) return pool.Count < poolSize; ;
             if (pool == null)
                 pool = new Stack<Momentum2D>((int)poolSize);
 
             pool.Push(momentum.Clean());
+            return pool.Count < poolSize;
         }
 
         public static bool IsPoolFull()

@@ -78,15 +78,15 @@ namespace Telescope2D
 				foreach (MomentumTrail2D trail in trails)
                 {
                     trail.EndSimulation(simulatedTick);
-                    trail.SendContactEvents();
+                    trail.SendContactEvents(simulatedTick);
                 }
 			}
             uint tick = (uint)(time / Time.fixedDeltaTime);
-            uint keepTick = tick - (uint)(remembered / Time.fixedDeltaTime);
+            uint keepTicks = tick - (uint)(remembered / Time.fixedDeltaTime);
             foreach (MomentumTrail2D trail in trails)
             {
-                trail.GoToTime(tick, keepTick);
-                trail.SendContactEvents();
+                trail.GoToTime(tick, keepTicks);
+                trail.SendContactEvents(tick);
             }
                 
 		}
@@ -119,8 +119,6 @@ namespace Telescope2D
                 }
                 clearKnowledge = true;
             }
-			
-
 			clearSight = true;
 		}
 
